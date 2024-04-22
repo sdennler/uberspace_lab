@@ -23,14 +23,14 @@ Mattermost
 
 .. note:: For this guide you should be familiar with the basic concepts of
 
-  * :manual:`MySQL <database-mysql>`
+  * :manual:`PostgreSQL <guide_postgresql>`
   * :manual:`supervisord <daemons-supervisord>`
   * :manual:`domains <web-domains>`
 
 Prerequisites
 =============
 
-.. include:: includes/my-print-defaults.rst
+You need to have :manual:`PostgreSQL <guide_postgresql>` initialized and configured. Tested with PostgreSQL version 15.6.
 
 Your URL needs to be setup:
 
@@ -43,17 +43,17 @@ Download the most recent Linux TAR archive from the `Mattermost website`_:
 
 .. code-block:: console
 
-  [isabell@stardust ~]$ wget https://releases.mattermost.com/5.18.0/mattermost-5.18.0-linux-amd64.tar.gz
-  --2019-12-23 13:27:01--  https://releases.mattermost.com/5.18.0/mattermost-5.18.0-linux-amd64.tar.gz
-  Resolving releases.mattermost.com (releases.mattermost.com)... 99.86.88.55, 99.86.88.121, 99.86.88.31, ...
-  Connecting to releases.mattermost.com (releases.mattermost.com)|99.86.88.55|:443... connected.
+  [isabell@stardust ~]$ wget https://releases.mattermost.com/9.7.1/mattermost-9.7.1-linux-amd64.tar.gz
+  --2024-04-22 17:06:14--  https://releases.mattermost.com/9.7.1/mattermost-9.7.1-linux-amd64.tar.gz
+  Resolving releases.mattermost.com (releases.mattermost.com)... 18.244.18.26, 18.244.18.94, 18.244.18.91, ...
+  Connecting to releases.mattermost.com (releases.mattermost.com)|18.244.18.26|:443... connected.
   HTTP request sent, awaiting response... 200 OK
-  Length: 155306557 (148M) [application/x-gzip]
-  Saving to: ‘mattermost-5.18.0-linux-amd64.tar.gz’
+  Length: 289186599 (276M) [application/x-tar]
+  Saving to: ‘mattermost-9.7.1-linux-amd64.tar.gz’
 
-  100%[====================================================================>] 155,306,557 22.5MB/s   in 6.6s
+  100%[============================================================================================================================================================================================>] 289'186'599 68.8MB/s   in 4.1s
 
-  2019-12-23 13:27:08 (22.6 MB/s) - ‘mattermost-5.18.0-linux-amd64.tar.gz’ saved [155306557/155306557]
+  2024-04-22 17:06:19 (66.8 MB/s) - ‘mattermost-9.7.1-linux-amd64.tar.gz’ saved [289186599/289186599
 
   [isabell@stardust ~]$
 
@@ -61,7 +61,7 @@ Extract the archive:
 
 .. code-block:: console
 
-  [isabell@stardust ~]$ tar xfv mattermost-5.18.0-linux-amd64.tar.gz
+  [isabell@stardust ~]$ tar -xvzf mattermost-*.tar.gz
   […]
   mattermost/prepackaged_plugins/mattermost-plugin-custom-attributes-v1.0.2.tar.gz
   mattermost/prepackaged_plugins/mattermost-plugin-zoom-v1.1.2.tar.gz
@@ -74,17 +74,25 @@ Configuration
 Set up a Database
 -----------------
 
-Run the following code to create the database ``<username>_mattermost`` in MySQL:
+Run the following code to create the database and user:
 
 .. code-block:: console
 
-  [isabell@stardust ~]$ mysql -e "CREATE DATABASE ${USER}_mattermost COLLATE utf8mb4_unicode_ci;"
+  [isabell@stardust ~]$ createdb --encoding=UTF8 mattermost
+  [isabell@stardust ~]$ psql -d mattermost -c "CREATE USER mmuser WITH PASSWORD 'MySuperSecretPassword';"
+  CREATE ROLE
+  [isabell@stardust ~]$ psql -d mattermost -c "GRANT ALL PRIVILEGES ON DATABASE mattermost to mmuser;"
+  GRANT
+  [isabell@stardust ~]$ psql -d mattermost -c "ALTER DATABASE mattermost OWNER TO mmuser;"
+  ALTER DATABASE
+  [isabell@stardust ~]$ psql -d mattermost -c "GRANT USAGE, CREATE ON SCHEMA PUBLIC TO mmuser;"
+  GRANT
   [isabell@stardust ~]$
 
 Change the configuration
 ------------------------
 
-You need to set up your URL, and MySQL settings in ``~/mattermost/config/config.json``.
+You need to set up your URL, and database settings in ``~/mattermost/config/config.json``.
 
 First, set your site URL:
 
@@ -92,23 +100,17 @@ First, set your site URL:
 
     "SiteURL": "https://isabell.uber.space"
 
-Then find the ``SqlSettings`` block and change ``DriverName`` driver to ``mysql``. Change ``DataSource`` like bellow but replace ``isabell`` on both occasions with your uberspace username and ``MySuperSecretPassword`` with your MySQL password:
+Then find the ``SqlSettings`` block and in ``DataSource`` replace ``mostest`` with your database password and ``mattermost_test`` with your database name:
 
 .. code-block:: javascript
  :emphasize-lines: 2,3
 
-    "SqlSettings": {
-      "DriverName": "mysql",
-      "DataSource": "isabell:MySuperSecretPassword@tcp(localhost:3306)/isabell_mattermost?charset=utf8mb4,utf8\u0026readTimeout=30s\u0026writeTimeout=30s",
-      "DataSourceReplicas": [],
-      "DataSourceSearchReplicas": [],
-      "MaxIdleConns": 20,
-      "ConnMaxLifetimeMilliseconds": 3600000,
-      "MaxOpenConns": 300,
-      "Trace": false,
-      "AtRestEncryptKey": "",
-      "QueryTimeout": 30
-    },
+  "SqlSettings": {
+    "DriverName": "postgres",
+    "DataSource": "postgres://mmuser:MySuperSecretPassword@localhost/mattermost?sslmode=disable\u0026connect_timeout=10\u0026binary_parameters=yes",
+    […]
+  },
+
 
 
 Configure web server
@@ -135,7 +137,12 @@ Create ``~/etc/services.d/mattermost.ini`` with the following content:
 
 .. include:: includes/supervisord.rst
 
-If it's not in state RUNNING, check your configuration.
+If it's not in state RUNNING, check your configuration or logfile.
+
+.. code-block:: console
+
+  [isabell@stardust ~]$ less ~/mattermost/logs/mattermost.log
+
 
 Setup a user
 ------------
@@ -255,7 +262,7 @@ Use the script attached to update Mattermost to the current version. Run the scr
 	printf "\n===\nUpdate completed successfully.\n==="
 
 
-.. _`Mattermost website`: https://mattermost.com/download/
+.. _`Mattermost website`: https://docs.mattermost.com/install/install-tar.html#download
 .. _`Mattermost`: https://mattermost.com/
 
 
